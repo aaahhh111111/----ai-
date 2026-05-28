@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input, Select, Textarea } from "@/components/ui/input";
+import { ParagraphView } from "@/components/knowledge/paragraph-view";
 import { parseTags } from "@/lib/utils";
 import { Pencil, Plus, Search, Trash2 } from "lucide-react";
 
@@ -40,7 +42,11 @@ const emptyForm: FormState = {
   category: "",
 };
 
-export default function KnowledgePage() {
+function KnowledgePageInner() {
+  const searchParams = useSearchParams();
+  const deepLinkId = searchParams.get("id");
+  const deepLinkPara = searchParams.get("para");
+
   const [list, setList] = useState<Knowledge[]>([]);
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState("hybrid");
@@ -65,6 +71,15 @@ export default function KnowledgePage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!deepLinkId) return;
+    fetch(`/api/knowledge/${deepLinkId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((item: Knowledge | null) => {
+        if (item) setSelected(item);
+      });
+  }, [deepLinkId]);
 
   async function save() {
     const tags = form.tags.split(/[,，]/).map((t) => t.trim()).filter(Boolean);
@@ -263,10 +278,27 @@ export default function KnowledgePage() {
             <p className="mt-2 text-xs text-slate-400">
               浏览 {selected.viewCount} · 引用 {selected.useCount} · 来源 {selected.source}
             </p>
-            <pre className="mt-4 whitespace-pre-wrap text-sm text-slate-700">{selected.content}</pre>
+            <ParagraphView
+              knowledgeId={selected.id}
+              title={selected.title}
+              content={selected.content}
+              highlightIndex={
+                deepLinkId === selected.id && deepLinkPara != null
+                  ? parseInt(deepLinkPara, 10)
+                  : null
+              }
+            />
           </Card>
         )}
       </div>
     </div>
+  );
+}
+
+export default function KnowledgePage() {
+  return (
+    <Suspense fallback={<p className="p-6 text-slate-400">加载中...</p>}>
+      <KnowledgePageInner />
+    </Suspense>
   );
 }
