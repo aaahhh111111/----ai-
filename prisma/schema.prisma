@@ -1,0 +1,77 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum KnowledgeStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum KnowledgeSource {
+  MANUAL
+  IMPORT
+  AI_EXTRACT
+  CHAT_LEARN
+}
+
+model Knowledge {
+  id          String          @id @default(uuid())
+  title       String
+  content     String
+  summary     String?
+  tags        String          @default("[]")
+  status      KnowledgeStatus @default(ACTIVE)
+  source      KnowledgeSource @default(MANUAL)
+  category    String?
+  mediaType   String          @default("text")
+  mediaUrl    String?
+  viewCount   Int             @default(0)
+  useCount    Int             @default(0)
+  embedding   String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  usageLogs   UsageLog[]
+}
+
+model Agent {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  systemPrompt String
+  tagFilter   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  sessions    ChatSession[]
+}
+
+model ChatSession {
+  id        String   @id @default(uuid())
+  agentId   String
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  title     String   @default("新对话")
+  createdAt DateTime @default(now())
+  messages  ChatMessage[]
+}
+
+model ChatMessage {
+  id        String   @id @default(uuid())
+  sessionId String
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role      String
+  content   String
+  createdAt DateTime @default(now())
+}
+
+model UsageLog {
+  id          String   @id @default(uuid())
+  knowledgeId String?
+  knowledge   Knowledge? @relation(fields: [knowledgeId], references: [id], onDelete: SetNull)
+  action      String
+  metadata    String?
+  createdAt   DateTime @default(now())
+}
