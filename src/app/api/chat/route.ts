@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { KnowledgeSource, KnowledgeStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { chatCompletion, learnFromConversation } from "@/lib/ai";
-import { buildContextFromResults, indexKnowledgeEmbedding, searchKnowledge } from "@/lib/search";
+import {
+  buildContextFromChunks,
+  searchKnowledgeChunks,
+  toChunkReferences,
+} from "@/lib/chunks";
+import { indexKnowledgeEmbedding } from "@/lib/search";
 import { stringifyTags } from "@/lib/utils";
 
 export async function POST(req: NextRequest) {
@@ -36,22 +41,27 @@ export async function POST(req: NextRequest) {
     ? (JSON.parse(session.agent.tagFilter) as string[])
     : [];
 
-  const results = await searchKnowledge({
+  const chunkResults = await searchKnowledgeChunks({
     query: message,
     tags: tagFilter,
     status: KnowledgeStatus.ACTIVE,
     mode: "hybrid",
-    limit: 5,
+    limit: 6,
   });
 
-  for (const r of results) {
+  const citedKnowledgeIds = new Set<string>();
+  for (const r of chunkResults) {
+    citedKnowledgeIds.add(r.chunk.knowledgeId);
+  }
+  for (const id of citedKnowledgeIds) {
     await prisma.knowledge.update({
-      where: { id: r.item.id },
+      where: { id },
       data: { useCount: { increment: 1 } },
     });
   }
 
-  const context = buildContextFromResults(results);
+  const references = toChunkReferences(chunkResults);
+  const context = buildContextFromChunks(chunkResults);
   const history = session.messages.map((m) => ({
     role: m.role as "user" | "assistant",
     content: m.content,
@@ -59,7 +69,7 @@ export async function POST(req: NextRequest) {
 
   const systemContent = `${session.agent.systemPrompt}
 
-以下是与问题相关的知识库片段，请优先依据这些内容回答：
+以下是与问题相关的知识库段落片段（编号 [1][2]…），请优先依据这些内容回答，并在回答中用 [编号] 标注引用：
 ${context || "（未检索到相关知识）"}`;
 
   const reply = await chatCompletion([
@@ -80,7 +90,7 @@ ${context || "（未检索到相关知识）"}`;
       action: "chat",
       metadata: JSON.stringify({
         sessionId: session.id,
-        refs: results.map((r) => r.item.id),
+        refs: references.map((r) => ({ id: r.knowledgeId, anchor: r.anchor })),
       }),
     },
   });
@@ -107,11 +117,7 @@ ${context || "（未检索到相关知识）"}`;
   return NextResponse.json({
     sessionId: session.id,
     reply,
-    references: results.map((r) => ({
-      id: r.item.id,
-      title: r.item.title,
-      score: r.score,
-    })),
+    references,
     learned,
     demoMode: !process.env.OPENAI_API_KEY,
   });
